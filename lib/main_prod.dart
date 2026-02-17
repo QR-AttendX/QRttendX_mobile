@@ -15,6 +15,7 @@ Future<void> main() async {
     App(
       themeController: themeController,
       onboardingController: onboardingController,
+      flavorLabel: 'PROD',
     ),
   );
 }
