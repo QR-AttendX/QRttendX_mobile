@@ -146,26 +146,28 @@ class _QrScreenState extends State<QrScreen> with WidgetsBindingObserver {
                           onDetect: _onDetect,
                         ),
                 ),
-                const SizedBox(height: 12),
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Icon(
-                          controller.isProcessing
-                              ? Icons.hourglass_top
-                              : Icons.info_outline,
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(controller.statusMessage),
-                        ),
-                      ],
+                if (!_showMyQrCode) ...[
+                  const SizedBox(height: 12),
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(
+                            controller.isProcessing
+                                ? Icons.hourglass_top
+                                : Icons.info_outline,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(controller.statusMessage),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ),
+                ],
                 const SizedBox(height: 12),
                 Row(
                   children: [
@@ -185,11 +187,13 @@ class _QrScreenState extends State<QrScreen> with WidgetsBindingObserver {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    Expanded(
-                      child: FilledButton.tonalIcon(
+                    SizedBox(
+                      height: 44,
+                      width: 52,
+                      child: IconButton.filledTonal(
                         onPressed: _showMyQrCode ? null : _toggleCamera,
+                        tooltip: 'Rotate Camera',
                         icon: const Icon(Icons.cameraswitch_outlined),
-                        label: const Text('Rotate Camera'),
                       ),
                     ),
                   ],
@@ -213,7 +217,8 @@ class _QrScreenState extends State<QrScreen> with WidgetsBindingObserver {
     final qrData = '$_repositoryUrl?profile=${Uri.encodeComponent(payloadJson)}';
     return _OwnQrPayload(
       qrData: qrData,
-      payloadJson: const JsonEncoder.withIndent('  ').convert(payloadMap),
+      fullName: profile.fullName,
+      username: profile.username,
     );
   }
 }
@@ -269,6 +274,18 @@ class _MyQrCodePanel extends StatelessWidget {
         padding: const EdgeInsets.all(12),
         child: Column(
           children: [
+            Text(
+              payload!.fullName,
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+            ),
+            Text(
+              '@${payload!.username}',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 12),
             Expanded(
               child: Center(
                 child: Container(
@@ -285,23 +302,6 @@ class _MyQrCodePanel extends StatelessWidget {
                 ),
               ),
             ),
-            Text(
-              'Your local account QR payload (JSON):',
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-            const SizedBox(height: 6),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(10),
-                color: Theme.of(context).colorScheme.surfaceContainerHighest,
-              ),
-              child: Text(
-                payload!.payloadJson,
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-            ),
           ],
         ),
       ),
@@ -312,9 +312,11 @@ class _MyQrCodePanel extends StatelessWidget {
 class _OwnQrPayload {
   const _OwnQrPayload({
     required this.qrData,
-    required this.payloadJson,
+    required this.fullName,
+    required this.username,
   });
 
   final String qrData;
-  final String payloadJson;
+  final String fullName;
+  final String username;
 }

@@ -40,13 +40,14 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     final filteredRecords = _selectedSection == _allSections
         ? todayRecords
         : todayRecords
-            .where((record) => record.section == _selectedSection)
-            .toList(growable: false);
+              .where((record) => record.section == _selectedSection)
+              .toList(growable: false);
     final selectedVisibleCount = filteredRecords
         .where((record) => _selectedRecordIds.contains(record.recordId))
         .length;
     final allVisibleSelected =
-        filteredRecords.isNotEmpty && selectedVisibleCount == filteredRecords.length;
+        filteredRecords.isNotEmpty &&
+        selectedVisibleCount == filteredRecords.length;
 
     return Stack(
       children: [
@@ -62,8 +63,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                     Text(
                       'Today\'s Attendance',
                       style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                     const SizedBox(height: 12),
                     _FilterRow(
@@ -228,7 +229,9 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       return;
     }
 
-    final updatedCount = context.read<AttendanceController>().setTimeOutForRecordIds(
+    final updatedCount = context
+        .read<AttendanceController>()
+        .setTimeOutForRecordIds(
           recordIds: _selectedRecordIds,
           hour: selectedTime.hour,
           minute: selectedTime.minute,
@@ -263,9 +266,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 12),
       alignment: Alignment.center,
       decoration: BoxDecoration(
-        border: Border.all(
-          color: Theme.of(context).colorScheme.outlineVariant,
-        ),
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Text(
@@ -300,16 +301,9 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
               ListTile(
                 leading: const Icon(Icons.download),
                 title: const Text('Export Attendance Excel'),
-                onTap: () {
+                onTap: () async {
                   Navigator.of(sheetContext).pop();
-                  if (!mounted) {
-                    return;
-                  }
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Export is not implemented yet.'),
-                    ),
-                  );
+                  await _exportExcel();
                 },
               ),
               const SizedBox(height: 8),
@@ -367,6 +361,42 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     }
   }
 
+  Future<void> _exportExcel() async {
+    if (!mounted) {
+      return;
+    }
+
+    final attendanceController = context.read<AttendanceController>();
+    setState(() {
+      _isImporting = true;
+    });
+
+    try {
+      final section = _selectedSection == _allSections
+          ? null
+          : _selectedSection;
+      final result = await attendanceController.exportTodayAttendanceExcel(
+        section: section,
+      );
+      if (result.exportedCount == 0) {
+        _showMessage('No attendance records for today to export.');
+        return;
+      }
+
+      _showMessage(
+        'Exported ${result.exportedCount} row(s) to ${result.filePath}',
+      );
+    } catch (error) {
+      _showMessage('Failed to export attendance Excel file: $error');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isImporting = false;
+        });
+      }
+    }
+  }
+
   Future<void> _openAddStudentSheet() async {
     final allSections = _allRecordedSections(
       context.read<AttendanceController>().records,
@@ -375,19 +405,17 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      builder: (sheetContext) => _AddStudentSheet(
-        sectionOptions: allSections,
-      ),
+      builder: (sheetContext) => _AddStudentSheet(sectionOptions: allSections),
     );
     if (result == null || !mounted) {
       return;
     }
 
     context.read<AttendanceController>().addManualStudentAttendance(
-          fullName: result.fullName,
-          username: result.username,
-          section: result.section,
-        );
+      fullName: result.fullName,
+      username: result.username,
+      section: result.section,
+    );
     _showMessage('Student added to today\'s attendance.');
   }
 
@@ -395,9 +423,9 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     if (!mounted) {
       return;
     }
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   List<String> _allRecordedSections(List<AttendanceModel> records) {
@@ -440,17 +468,17 @@ class _FilterRow extends StatelessWidget {
             style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
             decoration: const InputDecoration(
               isDense: true,
-              contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+              contentPadding: EdgeInsets.symmetric(
+                horizontal: 10,
+                vertical: 10,
+              ),
               border: OutlineInputBorder(),
             ),
             items: sections
                 .map(
                   (section) => DropdownMenuItem<String>(
                     value: section,
-                    child: Text(
-                      section,
-                      overflow: TextOverflow.ellipsis,
-                    ),
+                    child: Text(section, overflow: TextOverflow.ellipsis),
                   ),
                 )
                 .toList(growable: false),
@@ -551,7 +579,9 @@ class _AttendanceTable extends StatelessWidget {
         const SizedBox(height: 8),
         Container(
           decoration: BoxDecoration(
-            border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+            border: Border.all(
+              color: Theme.of(context).colorScheme.outlineVariant,
+            ),
             borderRadius: BorderRadius.circular(10),
           ),
           child: SizedBox(
@@ -573,10 +603,7 @@ class _AttendanceTable extends StatelessWidget {
                   onTap: !isEditMode
                       ? null
                       : () {
-                          onToggleRecordSelection(
-                            record.recordId,
-                            !isSelected,
-                          );
+                          onToggleRecordSelection(record.recordId, !isSelected);
                         },
                   child: SizedBox(
                     height: _rowHeight,
@@ -643,9 +670,7 @@ class _AttendanceTable extends StatelessWidget {
 }
 
 class _AddStudentSheet extends StatefulWidget {
-  const _AddStudentSheet({
-    required this.sectionOptions,
-  });
+  const _AddStudentSheet({required this.sectionOptions});
 
   final List<String> sectionOptions;
 
@@ -691,9 +716,9 @@ class _AddStudentSheetState extends State<_AddStudentSheet> {
             children: [
               Text(
                 'Add New Student',
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
+                style: Theme.of(
+                  context,
+                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
               ),
               const SizedBox(height: 12),
               TextFormField(

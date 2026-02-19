@@ -1,11 +1,17 @@
 import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:excel/excel.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:qr_attendx_mobile/models/attendance_model.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+const MethodChannel _downloadsChannel = MethodChannel(
+  'qr_attendx_mobile/downloads',
+);
 
 class AttendanceImportResult {
   const AttendanceImportResult({
@@ -15,6 +21,16 @@ class AttendanceImportResult {
 
   final int importedCount;
   final int skippedCount;
+}
+
+class AttendanceExportResult {
+  const AttendanceExportResult({
+    required this.exportedCount,
+    required this.filePath,
+  });
+
+  final int exportedCount;
+  final String filePath;
 }
 
 class AttendanceController extends ChangeNotifier {
@@ -44,7 +60,9 @@ class AttendanceController extends ChangeNotifier {
     final trimmedName = fullName.trim();
     final trimmedUsername = username.trim();
     final trimmedSection = section.trim();
-    if (trimmedName.isEmpty || trimmedUsername.isEmpty || trimmedSection.isEmpty) {
+    if (trimmedName.isEmpty ||
+        trimmedUsername.isEmpty ||
+        trimmedSection.isEmpty) {
       return;
     }
 
@@ -105,10 +123,7 @@ class AttendanceController extends ChangeNotifier {
         hour,
         minute,
       );
-      _records[i] = record.copyWith(
-        timeOut: timeout,
-        status: 'Timed Out',
-      );
+      _records[i] = record.copyWith(timeOut: timeout, status: 'Timed Out');
       updated++;
     }
 
@@ -135,24 +150,31 @@ class AttendanceController extends ChangeNotifier {
           .map((cell) => _stringValue(_cellValue(cell)).toLowerCase())
           .toList(growable: false);
 
-      final studentIndex = _findIndex(
-        headers,
-        const ['student', 'fullname', 'full name', 'name'],
-      );
+      final studentIndex = _findIndex(headers, const [
+        'student',
+        'fullname',
+        'full name',
+        'name',
+      ]);
       if (studentIndex < 0) {
         continue;
       }
 
       final sectionIndex = _findIndex(headers, const ['section', 'class']);
       final statusIndex = _findIndex(headers, const ['status']);
-      final timeInIndex = _findIndex(
-        headers,
-        const ['time in', 'timein', 'date', 'datetime', 'timestamp'],
-      );
-      final studentIdIndex = _findIndex(
-        headers,
-        const ['student id', 'studentid', 'id', 'username'],
-      );
+      final timeInIndex = _findIndex(headers, const [
+        'time in',
+        'timein',
+        'date',
+        'datetime',
+        'timestamp',
+      ]);
+      final studentIdIndex = _findIndex(headers, const [
+        'student id',
+        'studentid',
+        'id',
+        'username',
+      ]);
 
       for (var i = 1; i < sheet.rows.length; i++) {
         final row = sheet.rows[i];
@@ -166,15 +188,18 @@ class AttendanceController extends ChangeNotifier {
             ? _cellStringAt(row, sectionIndex)
             : 'Unknown Section';
         final status = statusIndex >= 0 ? _cellStringAt(row, statusIndex) : '';
-        final rawId = studentIdIndex >= 0 ? _cellStringAt(row, studentIdIndex) : '';
-        final rawTime = timeInIndex >= 0 ? _cellValueAt(row, timeInIndex) : null;
+        final rawId = studentIdIndex >= 0
+            ? _cellStringAt(row, studentIdIndex)
+            : '';
+        final rawTime = timeInIndex >= 0
+            ? _cellValueAt(row, timeInIndex)
+            : null;
         final timeIn = _parseTime(rawTime) ?? DateTime.now();
 
         final studentId = rawId.isEmpty
             ? _normalizeId('$studentName|$section')
             : _normalizeId(rawId);
-        final normalizedSection =
-            section.isEmpty ? 'Unknown Section' : section;
+        final normalizedSection = section.isEmpty ? 'Unknown Section' : section;
 
         imported.add(
           AttendanceModel(
@@ -204,6 +229,129 @@ class AttendanceController extends ChangeNotifier {
     );
   }
 
+  Future<AttendanceExportResult> exportTodayAttendanceExcel({
+    String? section,
+  }) async {
+    final now = DateTime.now();
+    final normalizedSection = section?.trim();
+    final todayRecords =
+        _records
+            .where((record) {
+              final isToday =
+                  record.timeIn.year == now.year &&
+                  record.timeIn.month == now.month &&
+                  record.timeIn.day == now.day;
+              if (!isToday) {
+                return false;
+              }
+
+              if (normalizedSection == null || normalizedSection.isEmpty) {
+                return true;
+              }
+              return record.section.trim() == normalizedSection;
+            })
+            .toList(growable: false)
+          ..sort((a, b) => a.timeIn.compareTo(b.timeIn));
+
+    final workbook = Excel.createExcel();
+    final sheetName = workbook.getDefaultSheet() ?? 'Sheet1';
+    final sheet = workbook[sheetName];
+
+    sheet.appendRow([
+      'Record ID',
+      'Student ID',
+      'Fullname',
+      'Section',
+      'Time In',
+      'Time Out',
+      'Status',
+    ]);
+
+    for (final record in todayRecords) {
+      sheet.appendRow([
+        record.recordId,
+        record.studentId,
+        record.studentName,
+        record.section,
+        _formatDateTimeForExcel(record.timeIn),
+        record.timeOut == null ? '' : _formatDateTimeForExcel(record.timeOut!),
+        record.status,
+      ]);
+    }
+
+    final encodedBytes = workbook.encode();
+    if (encodedBytes == null || encodedBytes.isEmpty) {
+      throw StateError('Failed to encode attendance workbook.');
+    }
+    final bytes = Uint8List.fromList(encodedBytes);
+
+    final fileName =
+        'attendance_${_dateForFileName(now)}_${_timeForFileName(now)}.xlsx';
+    if (Platform.isAndroid) {
+      final savedPath = await _saveToAndroidDownloads(
+        fileName: fileName,
+        bytes: bytes,
+      );
+      return AttendanceExportResult(
+        exportedCount: todayRecords.length,
+        filePath: savedPath,
+      );
+    }
+
+    final exportDirectory = await _resolveExportDirectory();
+    if (!await exportDirectory.exists()) {
+      await exportDirectory.create(recursive: true);
+    }
+
+    final filePath =
+        '${exportDirectory.path}${Platform.pathSeparator}$fileName';
+    final file = File(filePath);
+    await file.writeAsBytes(bytes, flush: true);
+
+    return AttendanceExportResult(
+      exportedCount: todayRecords.length,
+      filePath: file.path,
+    );
+  }
+
+  Future<Directory> _resolveExportDirectory() async {
+    if (Platform.isWindows) {
+      final userProfile = Platform.environment['USERPROFILE'];
+      if (userProfile != null && userProfile.isNotEmpty) {
+        return Directory('$userProfile\\Downloads\\QR AttendX');
+      }
+    }
+
+    final home = Platform.environment['HOME'];
+    if (home != null && home.isNotEmpty) {
+      return Directory('$home/Downloads/QR AttendX');
+    }
+
+    return Directory(
+      '${Directory.systemTemp.path}${Platform.pathSeparator}AttendX',
+    );
+  }
+
+  Future<String> _saveToAndroidDownloads({
+    required String fileName,
+    required Uint8List bytes,
+  }) async {
+    final savedPath = await _downloadsChannel.invokeMethod<String>(
+      'saveBytesToDownloads',
+      <String, Object>{
+        'fileName': fileName,
+        'mimeType':
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'relativePath': 'Download/QR AttendX',
+        'bytes': bytes,
+      },
+    );
+    if (savedPath == null || savedPath.isEmpty) {
+      throw StateError('Failed to save attendance export.');
+    }
+    return savedPath;
+  }
+
   Future<void> _restoreRecords() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -224,9 +372,9 @@ class AttendanceController extends ChangeNotifier {
       _records
         ..clear()
         ..addAll(
-          decoded
-              .whereType<Map<String, dynamic>>()
-              .map(AttendanceModel.fromJson),
+          decoded.whereType<Map<String, dynamic>>().map(
+            AttendanceModel.fromJson,
+          ),
         );
       _isLoaded = true;
       notifyListeners();
@@ -326,4 +474,26 @@ String _formatStatus(String raw) {
     return 'Present';
   }
   return '${lower[0].toUpperCase()}${lower.substring(1)}';
+}
+
+String _formatDateTimeForExcel(DateTime value) {
+  final month = value.month.toString().padLeft(2, '0');
+  final day = value.day.toString().padLeft(2, '0');
+  final hour = value.hour.toString().padLeft(2, '0');
+  final minute = value.minute.toString().padLeft(2, '0');
+  final second = value.second.toString().padLeft(2, '0');
+  return '${value.year}-$month-$day $hour:$minute:$second';
+}
+
+String _dateForFileName(DateTime value) {
+  final month = value.month.toString().padLeft(2, '0');
+  final day = value.day.toString().padLeft(2, '0');
+  return '${value.year}$month$day';
+}
+
+String _timeForFileName(DateTime value) {
+  final hour = value.hour.toString().padLeft(2, '0');
+  final minute = value.minute.toString().padLeft(2, '0');
+  final second = value.second.toString().padLeft(2, '0');
+  return '$hour$minute$second';
 }
