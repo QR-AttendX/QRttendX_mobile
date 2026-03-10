@@ -4,6 +4,6 @@
 ---
 
 ## Status
-Defended!! This Tool will be Archived soon at the end of 2026, we will only releasing 5 versions of the app <br>
+This tool is now a public archive, we will no longer applying bugs and fixes <br>
 **Prototype** - Under Development <br>
 
